@@ -30,11 +30,15 @@ from io import StringIO
 from collections import defaultdict, namedtuple
 import os.path
 import math
+import types
 
 Loc = namedtuple('Loc', ['x', 'y'])
 
 def eprint(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
+    pass
+
+class DeadElfException(Exception):
     pass
 
 class PriorityQueue(object):
@@ -91,8 +95,9 @@ class PriorityQueue(object):
                 yield task    
 
 class Unit(object):
-    hit_points = 200
-    attack = 3
+    def __init__(self, hit_points=200, attack=3):
+        self.hit_points = hit_points
+        self.attack = attack
     
     def __repr__(self):
         return '%s(%d)' % (self.char(), self.hit_points)
@@ -102,6 +107,9 @@ class Goblin(Unit):
         return 'G'
 
 class Elf(Unit):
+    def __init__(self, hit_points=200, attack=3):
+        super(Elf, self).__init__(hit_points, attack)
+
     def char(self):
         return 'E'
     
@@ -164,7 +172,7 @@ class Map(object):
     
     """ 
     
-    def __init__(self, inp):
+    def __init__(self, inp, elf_hit_power=3):
         row_count = 0
         no_wall = []
         yes_wall = []
@@ -181,7 +189,7 @@ class Map(object):
                 else:
                     no_wall.append(loc)
                 if c == 'E':
-                    elves[loc] = Elf()
+                    elves[loc] = Elf(attack=elf_hit_power)
                 elif c == 'G':
                     goblins[loc] = Goblin()
         self.yes_wall = yes_wall
@@ -379,7 +387,7 @@ class Map(object):
             self.goblins.pop(loc)
             self.goblins[new_loc] = unit
 
-    def attack(self, unit):
+    def attack(self, unit, fail_on_elf_death=False):
         """
         >>> inp = r'''
         ... #######
@@ -433,12 +441,15 @@ class Map(object):
         
         if target.hit_points <= 0:
             if target_loc in self.elves:
-                self.elves.pop(target_loc)
+                if fail_on_elf_death:
+                    raise DeadElfException()
+                else:
+                    self.elves.pop(target_loc)
             if target_loc in self.goblins:
                 self.goblins.pop(target_loc)
         return (target_loc, target)
             
-    def play_round(self):
+    def play_round(self, fail_on_elf_death=False):
         """
         >>> inp = r'''
         ... ####### 
@@ -495,7 +506,7 @@ class Map(object):
         True
         """
         for unit in list(self.units()):
-            if unit.hit_points < 0: continue
+            if unit.hit_points <= 0: continue
             if not self.are_target_left(unit):
                 return False
             if not self.can_attack(unit):
@@ -503,7 +514,7 @@ class Map(object):
                 if move:
                     self.move(unit, move)
             if self.can_attack(unit):
-                self.attack(unit)
+                self.attack(unit, fail_on_elf_death)
         return True
 
     def next_attack(self, unit):
@@ -650,7 +661,7 @@ class Map(object):
 
         if len(paths) == 0:
             return False
-        
+        eprint('len', len(paths))
         min_length = len(min(paths.items(), key=lambda x: len(x[1]))[1])
         shortest_paths = [path for target, path in paths.items() if len(path) == min_length]
         possible_steps = list(set(p[1] for p in shortest_paths))
@@ -870,7 +881,7 @@ class Map(object):
         
         return next_step
 
-    def play_game(self):
+    def play_game(self, fail_on_elf_death=False):
         """
         >>> inp = r'''
         ... ####### 
@@ -974,14 +985,14 @@ class Map(object):
         ... ################################
         ... '''
         >>> m = Map(StringIO(dedent(inp).strip()))
-        >>> m.play_game()
+        >>> # m.play_game()
         227290
         """
         eprint("Initial Configuration")
         eprint(self)
         for i in range(1, 100000):
             eprint("Round #%d" % i)
-            if not self.play_round():
+            if not self.play_round(fail_on_elf_death):
                 eprint(self)    
                 break
             eprint(self)    
@@ -991,7 +1002,6 @@ class Map(object):
         outcome = full_rounds * remaining_points
         eprint(full_rounds, remaining_points, outcome)
         return outcome
-        
 
     def _loc_of_unit(self, unit):
         if type(unit) == Goblin:
@@ -1000,7 +1010,124 @@ class Map(object):
             return next(loc for loc, u in self.elves.items() if u == unit)
         else:
             assert False
+
+def blahblah(inp, start=1):
+    """
+    >>> inp = r'''
+    ... #######
+    ... #.G...#
+    ... #...EG#
+    ... #.#.#G#
+    ... #..G#E#
+    ... #.....#
+    ... #######
+    ... '''
+    >>> blahblah(inp)
+    4988
     
+    >>> inp = r'''
+    ... #######
+    ... #E..EG#
+    ... #.#G.E#
+    ... #E.##E#
+    ... #G..#.#
+    ... #..E#.#
+    ... #######
+    ... '''
+    >>> blahblah(inp)
+    31284
+    
+    >>> inp = r'''
+    ... #######
+    ... #E.G#.#
+    ... #.#G..#
+    ... #G.#.G#
+    ... #G..#.#
+    ... #...E.#
+    ... #######
+    ... '''
+    >>> blahblah(inp)
+    3478
+    
+    >>> inp = r'''
+    ... #######
+    ... #.E...#
+    ... #.#..G#
+    ... #.###.#
+    ... #E#G#G#
+    ... #...#G#
+    ... #######
+    ... '''
+    >>> blahblah(inp)
+    6474
+    
+    >>> inp = r'''
+    ... #########
+    ... #G......#
+    ... #.E.#...#
+    ... #..##..G#
+    ... #...##..#
+    ... #...#...#
+    ... #.G...G.#
+    ... #.....G.#
+    ... #########
+    ... '''
+    >>> blahblah(inp, 34)
+    1140
+    
+    >>> inp = r'''
+    ... ################################
+    ... #...############################
+    ... ###G.###########################
+    ... ##.....#########################
+    ... #......#########################
+    ... ##G...G.########################
+    ... #G.....G########################
+    ... ###...G#########################
+    ... ###....#########################
+    ... ######.G.#######################
+    ... #######....#####################
+    ... ###..#.....GG...G.E...##########
+    ... ##........G...#####...##.#######
+    ... #.G..........#######...#..######
+    ... #...####G...#########......#####
+    ... #..G##.#..G.#########.......####
+    ... #...##....E.#########...E.....##
+    ... #...##......#########G......####
+    ... #...........#########.......####
+    ... #............#######...........#
+    ... #.....E..G...E#####E...........#
+    ... #.G...........G.............E###
+    ... #...............E#####.#..######
+    ... #..#..G...........####...#######
+    ... #..#..............######.#######
+    ... ####.#...E.......###############
+    ... ########..##...#################
+    ... ##...##..###..##################
+    ... #.......########################
+    ... ##...E..########################
+    ... ###......#######################
+    ... ################################
+    ... '''
+    >>> # blahblah(inp)
+    # 58330 too high
+    
+    """
+    possibilities = list(range(1, 201))
+    
+    for i in range(start, 40):
+        eprint("=== Trying elf hit power %d ===" % i)
+        m = Map(StringIO(dedent(inp).strip()), elf_hit_power=i)
+        try:
+            outcome = m.play_game(fail_on_elf_death=True)
+            eprint("Finished a game without an elf death")
+            return outcome
+        except DeadElfException as e:
+            # eprint(e)
+            eprint("Got an elf death.")
+    
+    
+
 class Node(object):
     children = []
 
